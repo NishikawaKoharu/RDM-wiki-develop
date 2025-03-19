@@ -1223,5 +1223,26 @@ var WikiPageMilkdown = function(selector, options) {
     });
 };
 
+//#46532 対応 Add Start
+const sleep = (time) => new Promise((r) => setTimeout(r, time));//timeはミリ秒
+
+async function pFiveSleep(){
+	await sleep(500);
+}
+window.onload = () => {
+    async function useJump(){
+        // 現在のURLにハッシュが含まれているか確認
+        if (window.location.hash) {
+            await pFiveSleep();
+            const target = document.querySelector(window.location.hash);
+            if (target) {
+                // 目的の要素へスクロール
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+    }
+    useJump();
+}
+//#46532 対応 Add End
 export default WikiPageMilkdown;
 
