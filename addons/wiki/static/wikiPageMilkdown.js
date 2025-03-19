@@ -1224,7 +1224,7 @@ var WikiPageMilkdown = function(selector, options) {
 };
 
 //#46532 対応 Add Start
-const sleep = (time) => new Promise((r) => setTimeout(r, time));//timeはミリ秒
+const sleep = (time) => new Promise((r) => setTimeout(r, time));
 
 async function pFiveSleep(){
 	await sleep(500);
