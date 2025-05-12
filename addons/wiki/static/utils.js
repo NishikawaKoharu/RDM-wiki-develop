@@ -40,8 +40,19 @@ export function flatMap(ast, fn) {
                         // 太文字かイタリックが存在した場合（下線or文字色と同時の場合のみ）
                         subTransFormStrong(node,sCnt)
                     }
+                    const indexULine = node.children[sCnt].value.indexOf("<u>");
+                    const indexColor = node.children[sCnt].value.indexOf("<span style=\"color\:");
+                    if(indexULine >= 0 && indexColor >=0){
+                        // どちらも存在した場合
+                        if(indexULine < indexColor){
+                            // 下線の方が先
+                            subTransForm(node,"u",sCnt)
+                        }else{
+                            // 文字色の方が先
+                            subTransForm(node, "span",sCnt)
+                        }
                     // 下線の場合
-                    if(/<u>/.test(node.children[sCnt].value)) {
+                    }else if(/<u>/.test(node.children[sCnt].value)) {
                         subTransForm(node,"u",sCnt)
                     // 文字色の場合
                     }else if (/<span style=\"color\:/.test(node.children[sCnt].value)) {
@@ -328,8 +339,12 @@ export function flatMap(ast, fn) {
         for(var j=0 ; j < itemData.length ; j++){
             if(itemData[j].startsWith("span style")){
                 tmpText = "<" + itemData[j]
+                tmpNode.push({type: 'text' ,value : tmpText})
+                tmpText = ""
             }else if(itemData[j].startsWith("u>")){
                 tmpText = "<" + itemData[j]
+                tmpNode.push({type: 'text' ,value : tmpText})
+                tmpText = ""
             }else if(itemData[j].startsWith("\/span>")){
                 tmpText = tmpText + "<\/span>"
                 tmpNode.push({type: 'text' ,value : tmpText})
