@@ -374,6 +374,12 @@ export function flatMap(ast, fn) {
                     tmpNode.push({type: 'text' ,value : itemData[j].replace('\/u>','')});
                 }
                 tmpText = '';
+            // #54864 開始タグと終了タグのみだった場合の対応
+            }else if(itemData[j] !== '' && itemData[j].startsWith('\>')){
+                tmpText = '<' + itemData[j];
+                tmpNode.push({type: 'text' ,value : tmpText});
+                tmpText = '';
+            // #54864 開始タグと終了タグのみだった場合の対応
             }else if(itemData[j] !== '' && tmpText === ''){
                 tmpNode.push({type: 'text' ,value : itemData[j]});
             }else if(itemData[j] !== '' && tmpText !== ''){
