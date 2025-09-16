@@ -10,7 +10,14 @@ export const underlineSchema = $markSchema('underline', function () {
             { tag: 'u' },
             { style: 'text-decoration', getAttrs: value => value === 'underline' ? {} : false },
         ],
-        toDOM: () => ['u', 0],
+        //nishi TesttoDOM: () => ['u', 0],
+        toDOM: () => [
+          'span',
+          {
+            style: 'text-decoration: underline; text-decoration-color: inherit;',
+          },
+          0,
+        ],
         parseMarkdown: {
             match: node => node.type === 'underline',
             runner: (state, node, markType) => {

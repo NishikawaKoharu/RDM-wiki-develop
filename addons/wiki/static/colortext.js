@@ -19,9 +19,11 @@ export const colortextSchema = $markSchema('colortext', function () {
       attrs: {
           color: { default: null },
       },
+      // nishi Test
       toDOM: mark => ['span', {
             style: `color: ${mark.attrs.color}; text-decoration-color: ${mark.attrs.color};`
         }, 0],
+      // nishi Test
       parseMarkdown: {
           match: node => node.type === 'colortext',
           runner: (state, node, markType) => {
