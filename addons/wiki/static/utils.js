@@ -292,27 +292,20 @@ export function flatMap(ast, fn) {
         var remainingChildren = [];
         var remainingChildren2 = [];
         var frontStr = node.children[startCnt].value.replace(/\*{1,3}<.*/,'');       // アスタリスク前
-        var regex = new RegExp(frontStr + '\\*{1,3}');
-        var frontStrAfter = node.children[startCnt].value.replace(regex,'');       // アスタリスク後
         var endCnt = startCnt;
         var strChildren = [];
         // 終わりの場所を調べる
         for(var i=startCnt ; i<node.children.length ; i++){
-            if(node.children[i].value && (node.children[i].value.match(/.*(\>|>)\*{1,3}/) || []).length === 1){
+            if(node.children[i].value && (node.children[i].value.match(/.*\>\*{1,3}/) || []).length === 1){
                 endCnt = i;
                 break;
             }
         }
-        var tailStr = node.children[endCnt].value.replace(/.*(\>|>)\*{1,3}/,'');   // アスタリスク後
+        var tailStr = node.children[endCnt].value.replace(/.*\>\*{1,3}/,'');   // アスタリスク後
         if(endCnt >= 1 ){
             for(var tailCnt=1 ; tailCnt<endCnt ; tailCnt++){
                 strChildren.push(node.children[tailCnt]);
             }
-            //test
-        }else if(frontStrAfter !== '' ){
-            var regexTail = new RegExp('\\*{1,3}' + tailStr);
-            var frontStrAfter2 = frontStrAfter.replace(regexTail,'');
-            strChildren.push({type: 'text', value: frontStrAfter2});
         }else{
             var str = node.children[startCnt].value.replace(frontStr,'').replace(tailStr,'').replace(/\*/g,''); // アスタリスクの中
             strChildren.push({type: 'text', value: str});
@@ -382,7 +375,7 @@ export function flatMap(ast, fn) {
                 }
                 tmpText = '';
             // #54864 開始タグと終了タグのみだった場合の対応
-            }else if(itemData[j] !== '' && (itemData[j].startsWith('\>') || itemData[j].startsWith('>'))){
+            }else if(itemData[j] !== '' && itemData[j].startsWith('\>')){
                 tmpText = '<' + itemData[j];
                 // #56280 blockquoteと文字装飾の対応
                 if(tmpText.startsWith('<>')){
@@ -401,11 +394,6 @@ export function flatMap(ast, fn) {
         // 残りのノードを詰め込む
         if(tmpText !== '' ){
             tmpNode.push({type: 'text' ,value : tmpText});
-        }
-
-        // tmpNodeが空の場合は何もしない
-        if(tmpNode.length === 0){
-            return spritCnt;
         }
 
         if(!(tmpNode[0].value.startsWith('<'))){
