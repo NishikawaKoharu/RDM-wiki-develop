@@ -82,6 +82,14 @@ export function flatMap(ast, fn) {
                         out.push(...transformedChildren);
                         break;
                     //#49455 Add End リンク付き画像対応
+                    } else if (nthChild.type === 'text' && /@\[osf\]\(/.test(nthChild.value)) {
+                        // Handle @[osf](GUID) format
+                        const transformed = transformOsfImage(nthChild);
+                        if (transformed && transformed.length > 0) {
+                            out.push(...transformed);
+                        } else {
+                            addTransformedChildren(nthChild, uLineCnt, node, out);
+                        }
                     } else {
                         addTransformedChildren(nthChild, uLineCnt, node, out);
                     }
@@ -101,6 +109,49 @@ export function flatMap(ast, fn) {
             }
         }
     }
+
+  function transformOsfImage(textNode) {
+      // Match @[osf](GUID) pattern
+      const osfImagePattern = /@\[osf\]\(([a-zA-Z0-9]{5,})\)/g;
+      const text = textNode.value;
+      const matches = [];
+      let lastIndex = 0;
+      let match;
+
+      while ((match = osfImagePattern.exec(text)) !== null) {
+          // Add text before the match
+          if (match.index > lastIndex) {
+              matches.push({ type: 'text', value: text.substring(lastIndex, match.index) });
+          }
+
+          // Create image node for @[osf](GUID)
+          const guid = match[1];
+          const osfURL = window.contextVars && window.contextVars.osfURL ? window.contextVars.osfURL : '';
+          let imageUrl = osfURL + guid + '/?action=download&mode=render';
+
+          // Check for view_only parameter
+          // Try to get $osf from global scope or window
+          var $osfHelper = (typeof $osf !== 'undefined') ? $osf : (window.$osf || null);
+          if ($osfHelper && $osfHelper.urlParams && $osfHelper.urlParams().view_only) {
+              imageUrl += '&view_only=' + $osfHelper.urlParams().view_only;
+          }
+
+          matches.push({
+              type: 'image',
+              alt: guid,
+              url: imageUrl
+          });
+
+          lastIndex = osfImagePattern.lastIndex;
+      }
+
+      // Add remaining text after the last match
+      if (lastIndex < text.length) {
+          matches.push({ type: 'text', value: text.substring(lastIndex) });
+      }
+
+      return matches.length > 0 ? matches : null;
+  }
 
   function transformImageSection(remainingChildren) {
       const result = [];
