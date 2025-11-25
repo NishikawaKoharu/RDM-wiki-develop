@@ -111,7 +111,7 @@ export function flatMap(ast, fn) {
     }
 
   function transformOsfImage(textNode) {
-      // Match @[osf](GUID) pattern
+      // @[osf](GUID) のパターン
       const osfImagePattern = /@\[osf\]\(([a-zA-Z0-9]{5,})\)/g;
       const text = textNode.value;
       const matches = [];
@@ -119,36 +119,34 @@ export function flatMap(ast, fn) {
       let match;
 
       while ((match = osfImagePattern.exec(text)) !== null) {
-          // Add text before the match
-          if (match.index > lastIndex) {
-              matches.push({ type: 'text', value: text.substring(lastIndex, match.index) });
-          }
+        if (match.index > lastIndex) {
+            matches.push({ type: 'text', value: text.substring(lastIndex, match.index) });
+        }
 
-          // Create image node for @[osf](GUID)
-          const guid = match[1];
-          const osfURL = window.contextVars && window.contextVars.osfURL ? window.contextVars.osfURL : '';
-          let imageUrl = osfURL + guid + '/?action=download&mode=render';
+        // @[osf](GUID)からURLを作る
+        const guid = match[1];
+        const osfURL = window.contextVars && window.contextVars.osfURL ? window.contextVars.osfURL : '';
+        let imageUrl = osfURL + guid + '/?action=download&mode=render';
 
-          // Check for view_only parameter
-          // Try to get $osf from global scope or window
-          var $osfHelper = (typeof $osf !== 'undefined') ? $osf : (window.$osf || null);
-          if ($osfHelper && $osfHelper.urlParams && $osfHelper.urlParams().view_only) {
-              imageUrl += '&view_only=' + $osfHelper.urlParams().view_only;
-          }
+        const $osfHelper = (typeof window !== 'undefined' && window.$osf && typeof window.$osf.urlParams === 'function') ? window.$osf : null;
 
-          matches.push({
-              type: 'image',
-              alt: guid,
-              url: imageUrl
-          });
+        if ($osfHelper && $osfHelper.urlParams && $osfHelper.urlParams().view_only) {
+            imageUrl += '&view_only=' + $osfHelper.urlParams().view_only;
+        }
 
-          lastIndex = osfImagePattern.lastIndex;
-      }
+        matches.push({
+            type: 'image',
+            alt: guid,
+            url: imageUrl
+        });
 
-      // Add remaining text after the last match
-      if (lastIndex < text.length) {
-          matches.push({ type: 'text', value: text.substring(lastIndex) });
-      }
+        lastIndex = osfImagePattern.lastIndex;
+    }
+
+    // Add remaining text after the last match
+    if (lastIndex < text.length) {
+        matches.push({ type: 'text', value: text.substring(lastIndex) });
+    }
 
       return matches.length > 0 ? matches : null;
   }
