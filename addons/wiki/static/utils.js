@@ -361,9 +361,9 @@ export function flatMap(ast, fn) {
         for(var i=startCnt ; i<node.children.length ; i++){
             // #56408 ページが表示できない件の対応 Mod Start
             //if(node.children[i].value && (node.children[i].value.match(/.*\>\*{1,3}/) || []).length === 1){
-            if(node.children[i].value && (node.children[i].value.match(/.*\u>\*{1,3}/) || []).length === 1
-                || (node.children[i].value && (node.children[i].value.match(/.*\span>\*{1,3}/) || []).length === 1)){
-            // #56408 ページが表示できない件の対応 Mod End
+            const v = node.children[i].value;
+            if (v && (/.*\u>\*{1,3}/.test(v) || /.*\span>\*{1,3}/.test(v))) {
+                // #56408 ページが表示できない件の対応 Mod End
                 endCnt = i;
                 break;
             }
