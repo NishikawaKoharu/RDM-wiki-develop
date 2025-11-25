@@ -42,7 +42,10 @@ export function flatMap(ast, fn) {
                 }
                 //#51297 Add Start 下線文字色対応
                 if (node.children[sCnt] && node.children[sCnt].type === 'text' ) {
-                    if(/\*</.test(node.children[sCnt].value)) {
+                    // #56408 表示できないページの対応 Mod Start
+                    //if(/\*</.test(node.children[sCnt].value)) {
+                    if(/\*<span/.test(node.children[sCnt].value) || /\*<u/.test(node.children[sCnt].value )) {
+                    // #56408 表示できないページの対応 Mod End
                         // 太文字かイタリックが存在した場合（下線or文字色と同時の場合のみ）
                         subTransFormStrong(node,sCnt);
                     }
@@ -340,12 +343,27 @@ export function flatMap(ast, fn) {
     function subTransFormStrong(node,startCnt){
         var remainingChildren = [];
         var remainingChildren2 = [];
-        var frontStr = node.children[startCnt].value.replace(/\*{1,3}<.*/,'');       // アスタリスク前
+        // #56408 ページが表示できない件の対応 Mod Start
+        //var frontStr = node.children[startCnt].value.replace(/\*{1,3}<.*/,'');       // アスタリスク前
+        // 開始位置を把握
+        var frontStr = '';
+        if(/\*<span/.test(node.children[startCnt].value)){
+            frontStr = node.children[startCnt].value.replace(/\*{1,3}<span.*/,'');
+        }else if(/\*<u/.test(node.children[startCnt].value )) {
+            frontStr = node.children[startCnt].value.replace(/\*{1,3}<u.*/,'');
+        }else{
+            return;
+        }
+        // #56408 ページが表示できない件の対応 Mod End
         var endCnt = startCnt;
         var strChildren = [];
         // 終わりの場所を調べる
         for(var i=startCnt ; i<node.children.length ; i++){
-            if(node.children[i].value && (node.children[i].value.match(/.*\>\*{1,3}/) || []).length === 1){
+            // #56408 ページが表示できない件の対応 Mod Start
+            //if(node.children[i].value && (node.children[i].value.match(/.*\>\*{1,3}/) || []).length === 1){
+            if(node.children[i].value && (node.children[i].value.match(/.*\u>\*{1,3}/) || []).length === 1
+                || (node.children[i].value && (node.children[i].value.match(/.*\span>\*{1,3}/) || []).length === 1)){
+            // #56408 ページが表示できない件の対応 Mod End
                 endCnt = i;
                 break;
             }
