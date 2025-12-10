@@ -24,6 +24,31 @@ export function flatMap(ast, fn) {
             }
             //#51315 Add End 訂正線とコードブロック対応
             for (var sCnt = 0 ; sCnt < node.children.length ; sCnt++) {
+               // @[osf](GUID)形式のリンクを画像ノードに変換（エンコードされていない形式）
+                if (node.children[sCnt] && node.children[sCnt].type === 'link' &&
+                    node.children[sCnt].url && /^[a-zA-Z0-9]{5,}$/.test(node.children[sCnt].url) &&
+                    node.children[sCnt].children && node.children[sCnt].children.length > 0 &&
+                    node.children[sCnt].children[0] && node.children[sCnt].children[0].type === 'text' &&
+                    node.children[sCnt].children[0].value === 'osf' &&
+                    sCnt > 0 && node.children[sCnt - 1] && node.children[sCnt - 1].type === 'text' &&
+                    node.children[sCnt - 1].value === '@') {
+                    // @[osf](GUID)形式を画像ノードに変換
+                    const guid = node.children[sCnt].url;
+                    const osfURL = window.contextVars && window.contextVars.osfURL ? window.contextVars.osfURL : '';
+                    let imageUrl = osfURL + guid + '/?action=download&mode=render';
+                    const $osfHelper = (typeof window !== 'undefined' && window.$osf && typeof window.$osf.urlParams === 'function') ? window.$osf : null;
+                    if ($osfHelper && $osfHelper.urlParams && $osfHelper.urlParams().view_only) {
+                        imageUrl += '&view_only=' + $osfHelper.urlParams().view_only;
+                    }
+                    // @テキストノードとリンクノードを画像ノードに置き換え
+                    node.children.splice(sCnt - 1, 2, {
+                        type: 'image',
+                        alt: guid,
+                        url: imageUrl
+                    });
+                    sCnt--; // インデックスを調整
+                    continue;
+                }
                 //#48569 Add Start 子アンカー対応
                 if (node.children[sCnt] && node.children[sCnt].type === 'link') {
 
