@@ -85,7 +85,8 @@ export function flatMap(ast, fn) {
                         out.push(...transformedChildren);
                         break;
                     //#49455 Add End リンク付き画像対応
-                    } else if (nthChild.type === 'text' && /@\[osf\]\(/.test(nthChild.value)) {
+                    } else if (nthChild.type === 'text' && /@(?:\\\[|\[)osf(?:\\\]|\])\(/.test(nthChild.value)) {
+                    //} else if (nthChild.type === 'text' && /@\[osf\]\(/.test(nthChild.value)) {
                         // Handle @[osf](GUID) format
                         const transformed = transformOsfImage(nthChild);
                         if (transformed && transformed.length > 0) {
@@ -114,8 +115,8 @@ export function flatMap(ast, fn) {
     }
 
   function transformOsfImage(textNode) {
-      // @[osf](GUID) のパターン
-      const osfImagePattern = /@\[osf\]\(([a-zA-Z0-9]{5,})\)/g;
+      // @[osf](GUID) のパターン（エスケープされた形式とエスケープされていない形式の両方に対応）
+      const osfImagePattern = /@(?:\\\[|\[)osf(?:\\\]|\])\(([a-zA-Z0-9]{5,})\)/g;
       const text = textNode.value;
       const matches = [];
       let lastIndex = 0;
