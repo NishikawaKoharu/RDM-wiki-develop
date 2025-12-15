@@ -246,21 +246,32 @@ function ViewWidget(visible, version, viewText, rendered, contentURL, allowMathj
                     });
                 }
                 self.displaySource(toMarkdown);
-                if (document.getElementById('editWysiwyg').style.display === 'none'){
-                    document.getElementById('mMenuBar').style.display = '';
-                    document.getElementById('mEditorFooter').style.display = '';
+                var editWysiwygElement = document.getElementById('editWysiwyg');
+                if (editWysiwygElement && editWysiwygElement.style.display === 'none'){
+                    var mMenuBarElement = document.getElementById('mMenuBar');
+                    var mEditorFooterElement = document.getElementById('mEditorFooter');
+                    if (mMenuBarElement) mMenuBarElement.style.display = '';
+                    if (mEditorFooterElement) mEditorFooterElement.style.display = '';
                 }
-                document.getElementById('mEditor').style.display = '';
-                document.getElementById('wikiViewRender').style.display = 'none';
+                var mEditorElement = document.getElementById('mEditor');
+                if (mEditorElement) mEditorElement.style.display = '';
+                var wikiViewRenderElement = document.getElementById('wikiViewRender');
+                if (wikiViewRenderElement) wikiViewRenderElement.style.display = 'none';
             } else {
-                document.getElementById('mMenuBar').style.display = 'none';
-                document.getElementById('mEditor').style.display = 'none';
-                const milkdownDivs = document.getElementById('mEditor').querySelectorAll('div.milkdown');
-                if (milkdownDivs.length > 0) {
-                    milkdownDivs[0].remove();
+                var mMenuBarElement = document.getElementById('mMenuBar');
+                var mEditorElement = document.getElementById('mEditor');
+                var mEditorFooterElement = document.getElementById('mEditorFooter');
+                var wikiViewRenderElement = document.getElementById('wikiViewRender');
+                if (mMenuBarElement) mMenuBarElement.style.display = 'none';
+                if (mEditorElement) {
+                    mEditorElement.style.display = 'none';
+                    const milkdownDivs = mEditorElement.querySelectorAll('div.milkdown');
+                    if (milkdownDivs.length > 0) {
+                        milkdownDivs[0].remove();
+                    }
                 }
-                document.getElementById('mEditorFooter').style.display = 'none';
-                document.getElementById('wikiViewRender').style.display = '';
+                if (mEditorFooterElement) mEditorFooterElement.style.display = 'none';
+                if (wikiViewRenderElement) wikiViewRenderElement.style.display = '';
                 if (self.version() === 'current') {
                     requestURL = contentURL;
                 } else {
@@ -399,10 +410,13 @@ function ViewModel(options){
     });
 
     self.collaborativeStatus = ko.computed(function() {
-        if (self.viewVersion() === 'preview') {
-            document.getElementById('collaborativeStatus').style.display = '';
-        } else {
-            document.getElementById('collaborativeStatus').style.display = 'none';
+        var collaborativeStatusElement = document.getElementById('collaborativeStatus');
+        if (collaborativeStatusElement) {
+            if (self.viewVersion() === 'preview') {
+                collaborativeStatusElement.style.display = "";
+            } else {
+                collaborativeStatusElement.style.display = "none";
+            }
         }
     });
     // Save initial query params (except for the "mode" query params, which are handled
@@ -950,21 +964,27 @@ function ViewModel(options){
     self.editMode = function() {
       if(self.canEdit) {
         readonly = false;
-        document.getElementById('mMenuBar').style.display = '';
-        document.getElementById('editWysiwyg').style.display = 'none';
-        document.getElementById('mEditorFooter').style.display = '';
-        const milkdownDivs = document.getElementById('mEditor').querySelectorAll('div.milkdown');
-        if (milkdownDivs.length === 0) {
-            var request = $.ajax({
-                url: self.contentURL
-            });
-            var rawContent = '';
-            request.done(function (resp) {
-                if (resp.wiki_content){
-                    rawContent = resp.wiki_content;
-                }
-                mEdit = createMEditor(mEdit, self, rawContent);
-            });
+        var mMenuBarElement = document.getElementById('mMenuBar');
+        var editWysiwygElement = document.getElementById('editWysiwyg');
+        var mEditorFooterElement = document.getElementById('mEditorFooter');
+        var mEditorElement = document.getElementById('mEditor');
+        if (mMenuBarElement) mMenuBarElement.style.display = '';
+        if (editWysiwygElement) editWysiwygElement.style.display = 'none';
+        if (mEditorFooterElement) mEditorFooterElement.style.display = '';
+        if (mEditorElement) {
+            const milkdownDivs = mEditorElement.querySelectorAll('div.milkdown');
+            if (milkdownDivs.length === 0) {
+                var request = $.ajax({
+                    url: self.contentURL
+                });
+                var rawContent = '';
+                request.done(function (resp) {
+                    if (resp.wiki_content){
+                        rawContent = resp.wiki_content;
+                    }
+                    mEdit = createMEditor(mEdit, self, rawContent);
+                });
+            }
         }
         self.viewVersion('preview');
       }
