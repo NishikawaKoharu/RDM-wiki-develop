@@ -236,6 +236,10 @@ function ViewWidget(visible, version, viewText, rendered, contentURL, allowMathj
         self.allowFullRender();
         var requestURL;
         if (typeof self.version() !== 'undefined') {
+            var mMenuBarElement;
+            var mEditorElement;
+            var mEditorFooterElement;
+            var wikiViewRenderElement;
             if (self.version() === 'preview') {
                 var toMarkdown = '';
                 if (mEdit !== undefined) {
@@ -248,20 +252,20 @@ function ViewWidget(visible, version, viewText, rendered, contentURL, allowMathj
                 self.displaySource(toMarkdown);
                 var editWysiwygElement = document.getElementById('editWysiwyg');
                 if (editWysiwygElement && editWysiwygElement.style.display === 'none'){
-                    var mMenuBarElement = document.getElementById('mMenuBar');
-                    var mEditorFooterElement = document.getElementById('mEditorFooter');
+                    mMenuBarElement = document.getElementById('mMenuBar');
+                    mEditorFooterElement = document.getElementById('mEditorFooter');
                     if (mMenuBarElement) mMenuBarElement.style.display = '';
                     if (mEditorFooterElement) mEditorFooterElement.style.display = '';
                 }
-                var mEditorElement = document.getElementById('mEditor');
+                mEditorElement = document.getElementById('mEditor');
                 if (mEditorElement) mEditorElement.style.display = '';
-                var wikiViewRenderElement = document.getElementById('wikiViewRender');
+                wikiViewRenderElement = document.getElementById('wikiViewRender');
                 if (wikiViewRenderElement) wikiViewRenderElement.style.display = 'none';
             } else {
-                var mMenuBarElement = document.getElementById('mMenuBar');
-                var mEditorElement = document.getElementById('mEditor');
-                var mEditorFooterElement = document.getElementById('mEditorFooter');
-                var wikiViewRenderElement = document.getElementById('wikiViewRender');
+                mMenuBarElement = document.getElementById('mMenuBar');
+                mEditorElement = document.getElementById('mEditor');
+                mEditorFooterElement = document.getElementById('mEditorFooter');
+                wikiViewRenderElement = document.getElementById('wikiViewRender');
                 if (mMenuBarElement) mMenuBarElement.style.display = 'none';
                 if (mEditorElement) {
                     mEditorElement.style.display = 'none';
