@@ -413,9 +413,9 @@ function ViewModel(options){
         var collaborativeStatusElement = document.getElementById('collaborativeStatus');
         if (collaborativeStatusElement) {
             if (self.viewVersion() === 'preview') {
-                collaborativeStatusElement.style.display = "";
+                collaborativeStatusElement.style.display = '';
             } else {
-                collaborativeStatusElement.style.display = "none";
+                collaborativeStatusElement.style.display = 'none';
             }
         }
     });
