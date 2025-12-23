@@ -274,8 +274,8 @@ function ViewWidget(visible, version, viewText, rendered, contentURL, allowMathj
                         milkdownDivs[0].remove();
                     }
                 }
-                if (mEditorFooterElement) mEditorFooterElement.style.display = 'none';
-                if (wikiViewRenderElement) wikiViewRenderElement.style.display = '';
+                document.getElementById('mEditorFooter').style.display = 'none';
+                document.getElementById('wikiViewRender').style.display = '';
                 if (self.version() === 'current') {
                     requestURL = contentURL;
                 } else {
@@ -968,27 +968,21 @@ function ViewModel(options){
     self.editMode = function() {
       if(self.canEdit) {
         readonly = false;
-        var mMenuBarElement = document.getElementById('mMenuBar');
-        var editWysiwygElement = document.getElementById('editWysiwyg');
-        var mEditorFooterElement = document.getElementById('mEditorFooter');
-        var mEditorElement = document.getElementById('mEditor');
-        if (mMenuBarElement) mMenuBarElement.style.display = '';
-        if (editWysiwygElement) editWysiwygElement.style.display = 'none';
-        if (mEditorFooterElement) mEditorFooterElement.style.display = '';
-        if (mEditorElement) {
-            const milkdownDivs = mEditorElement.querySelectorAll('div.milkdown');
-            if (milkdownDivs.length === 0) {
-                var request = $.ajax({
-                    url: self.contentURL
-                });
-                var rawContent = '';
-                request.done(function (resp) {
-                    if (resp.wiki_content){
-                        rawContent = resp.wiki_content;
-                    }
-                    mEdit = createMEditor(mEdit, self, rawContent);
-                });
-            }
+        document.getElementById('mMenuBar').style.display = '';
+        document.getElementById('editWysiwyg').style.display = 'none';
+        document.getElementById('mEditorFooter').style.display = '';
+        const milkdownDivs = document.getElementById('mEditor').querySelectorAll('div.milkdown');
+        if (milkdownDivs.length === 0) {
+            var request = $.ajax({
+                url: self.contentURL
+            });
+            var rawContent = '';
+            request.done(function (resp) {
+                if (resp.wiki_content){
+                    rawContent = resp.wiki_content;
+                }
+                mEdit = createMEditor(mEdit, self, rawContent);
+            });
         }
         self.viewVersion('preview');
       }
