@@ -29,9 +29,7 @@ jobs:
         run: yarn --prefer-offline --frozen-lockfile --ignore-engines && yarn list --depth=0 && yarn add jshint@2.13.6
       - name: lint wiki/static
         run: yarn jshint --config .jshintrc ./addons/wiki/static/
-      - name: lint ts
-        run: yarn static/js/pages/
-      - name: yarn jshint --config .jshintrc ./website/static/js/pages/
-        run: yarn lint:style
+      - name: lint static/js/pages/
+        run: yarn jshint --config .jshintrc ./website/static/js/pages/
       - name: lint static/js/
-        run: jshint --config .jshintrc ./website/static/js/
+        run: yarn jshint --config .jshintrc ./website/static/js/
