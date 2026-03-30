@@ -1,0 +1,37 @@
+name: Unit Tests
+
+on:
+  push:
+    branches-ignore:
+      - '[0-9]*'
+  pull_request:
+    branches: [ main, develop, develop*, release* ]
+
+env:
+  SUPPRESS_NO_CONFIG_WARNING: true
+  GK_LOCK_YARN_OPTS: '--ignore-engines'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "21"
+      - name: Pre-Install dependencies
+        run: curl -o- -L https://yarnpkg.com/install.sh | bash && export PATH=$HOME/.yarn/bin:$PATH
+      - name: Install dependencies
+        run: yarn --prefer-offline --frozen-lockfile --ignore-engines && yarn list --depth=0 && yarn add jshint@2.13.6
+      - name: lint wiki/static
+        run: yarn jshint --config .jshintrc ./addons/wiki/static/
+      - name: lint ts
+        run: yarn static/js/pages/
+      - name: yarn jshint --config .jshintrc ./website/static/js/pages/
+        run: yarn lint:style
+      - name: lint static/js/
+        run: jshint --config .jshintrc ./website/static/js/
