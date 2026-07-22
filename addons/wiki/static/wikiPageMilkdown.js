@@ -1120,6 +1120,12 @@ function ViewModel(options){
     };
 
     self.editModeOff = function() {
+        // During collaborative editing, Close only leaves the shared session for
+        // other editors. Showing "Discard" would be misleading, so skip the dialog.
+        if (hasOtherAwarenessConnections(wsProvider)) {
+            self.cleanupAndClose();
+            return;
+        }
         var currentContent = getEditorMarkdown();
 
         if (currentContent !== originalContent) {
