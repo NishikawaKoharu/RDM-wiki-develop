@@ -8,6 +8,7 @@ var yjs = require('yjs');
 var yWebsocket = require('y-websocket');
 var yIndexeddb = require('y-indexeddb');
 var yProseMirror = require('y-prosemirror');
+var encoding = require('lib0/encoding');
 import * as mCore from '@milkdown/core';
 import * as mCommonmark from '@milkdown/preset-commonmark';
 import * as mNord from '@milkdown/theme-nord';
@@ -37,12 +38,107 @@ const editable = () => !readonly;
 var promises = [];
 var imageFolder = 'Wiki images';
 var validImgExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp'];
-const doc = new yjs.Doc();
+var doc = new yjs.Doc();
 const docId = window.contextVars.wiki.metadata.docId;
 const wikiCtx = window.contextVars;
 const wikiId = (wikiCtx.wiki.wikiName === 'home') ? wikiCtx.node.id : window.contextVars.wiki.wikiID;
 const wsPrefix = (window.location.protocol === 'https:') ? 'wss://' : 'ws://';
 const wsUrl = wsPrefix + window.contextVars.wiki.urls.y_websocket;
+var wsProvider = null;
+var indexeddbProvider = null;
+var originalContent = '';
+var isNavigatingAfterSave = false;
+var wsStatusHandlersBound = false;
+var editorLoadPromise = null;
+var indexeddbClearPromise = Promise.resolve();
+const AWARENESS_SETTLE_MS = 400;
+
+function getEditorMarkdown() {
+    var content = '';
+    if (mEdit && typeof mEdit.action === 'function') {
+        mEdit.action((ctx) => {
+            const view = ctx.get(mCore.editorViewCtx);
+            const serializer = ctx.get(mCore.serializerCtx);
+            content = serializer(view.state.doc);
+        });
+    }
+    return content;
+}
+
+function refreshEditorEditable() {
+    if (!mEdit || typeof mEdit.action !== 'function') {
+        return;
+    }
+
+    mEdit.action((ctx) => {
+        const view = ctx.get(mCore.editorViewCtx);
+        view.setProps({ editable });
+        if (!readonly) {
+            view.focus();
+        }
+    });
+}
+
+function hasOtherAwarenessConnections(provider) {
+    if (!provider || !provider.awareness) {
+        return false;
+    }
+
+    const localClientId = provider.awareness.clientID;
+    let hasOtherConnections = false;
+    provider.awareness.getStates().forEach(function(_state, clientId) {
+        if (clientId !== localClientId) {
+            hasOtherConnections = true;
+        }
+    });
+    return hasOtherConnections;
+}
+
+function waitForAwarenessSettlement() {
+    return new Promise(function(resolve) {
+        setTimeout(resolve, AWARENESS_SETTLE_MS);
+    });
+}
+
+function requestAwarenessRefresh(provider) {
+    if (!provider || !provider.wsconnected || !provider.ws) {
+        return;
+    }
+
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, yWebsocket.messageQueryAwareness);
+    provider.ws.send(encoding.toUint8Array(encoder));
+}
+
+function clearIndexeddbCache() {
+    if (!indexeddbProvider) {
+        return indexeddbClearPromise;
+    }
+
+    const provider = indexeddbProvider;
+    indexeddbProvider = null;
+    indexeddbClearPromise = Promise.resolve(provider.clearData()).catch(function(error) {
+        console.error('Failed to clear the wiki editor cache', error);
+    });
+    return indexeddbClearPromise;
+}
+
+function resetLocalCollabSession() {
+    if (indexeddbProvider) {
+        clearIndexeddbCache();
+    }
+    if (wsProvider) {
+        wsProvider.destroy();
+        wsProvider = null;
+    }
+    if (mEdit && mEdit.destroy) {
+        mEdit.destroy();
+    }
+    mEdit = null;
+    doc.destroy();
+    doc = new yjs.Doc();
+    wsStatusHandlersBound = false;
+}
 
 import { underlineSchema, underlineInputRule, remarkUnderlineToMarkdown, remarkUnderlineFromMarkdown, toggleUnderlineCommand } from './underline.js';
 import { colortextSchema, colortextInputRule, remarkColortextToMarkdown, remarkColortextFromMarkdown, toggleColortextCommand } from './colortext.js';
@@ -90,6 +186,8 @@ async function createMEditor(editor, vm, template) {
     if (editor && editor.destroy) {
         editor.destroy();
     }
+    mEdit = null;
+    await indexeddbClearPromise;
     const enableHtmlFileUploader = false;
     const uploader = async (files, schema) => {
         // You can handle whatever the file can be upload to GRDM.
@@ -117,9 +215,17 @@ async function createMEditor(editor, vm, template) {
         });
         return ret;
     };
-     
-    const indexeddbProvider = wikiId ? new yIndexeddb.IndexeddbPersistence(wikiId, doc) : (console.error('Invalid wikiId: it must not be null, undefined, or empty'), null);
-    const wsProvider = new yWebsocket.WebsocketProvider(wsUrl, docId, doc);
+
+    if (!indexeddbProvider && wikiId) {
+        indexeddbProvider = new yIndexeddb.IndexeddbPersistence(wikiId, doc);
+    } else if (!wikiId) {
+        console.error('Invalid wikiId: it must not be null, undefined, or empty');
+    }
+    if (!wsProvider) {
+        wsProvider = new yWebsocket.WebsocketProvider(wsUrl, docId, doc, { disableBc: true });
+    }
+
+    originalContent = template;
 
     mEdit = await mCore.Editor
         .make()
@@ -132,10 +238,12 @@ async function createMEditor(editor, vm, template) {
                 enableHtmlFileUploader,
             }));
             const debouncedMarkdownUpdated = $osf.debounce(async (ctx, markdown, prevMarkdown) => {
-                const compareWidgetElement = document.getElementById("compareWidget"); 
+                const compareWidgetElement = document.getElementById("compareWidget");
+
                 if (compareWidgetElement && compareWidgetElement.style.display !== 'none') {
                     vm.viewVM.displaySource(markdown);
-                } 
+                }
+
                 const view = ctx.get(mCore.editorViewCtx);
                 const state = view.state;
                 const undoElement = document.getElementById("undoWiki");
@@ -175,42 +283,90 @@ async function createMEditor(editor, vm, template) {
 
     mEdit.action((ctx) => {
         const collabService = ctx.get(mCollab.collabServiceCtx);
-        wsProvider.on('status', event => {
-            vm.status(event.status);
-            if (vm.status() !== 'connecting') {
+        if (!wsStatusHandlersBound) {
+            wsProvider.on('status', event => {
+                vm.status(event.status);
+                if (vm.status() !== 'connecting') {
+                    vm.updateStatus();
+                }
+                vm.throttledUpdateStatus();
+            });
+            wsProvider.on('connection-error', WSClosedEvent => {
+                vm.status('disconnected');
                 vm.updateStatus();
-            }
-            vm.throttledUpdateStatus();
-        });
-        wsProvider.on('connection-error', WSClosedEvent => {
-            vm.status('disconnected');
-            vm.updateStatus();
-            vm.throttledUpdateStatus();
-        });
+                vm.throttledUpdateStatus();
+            });
+            wsStatusHandlersBound = true;
+        }
         const fullname = window.contextVars.currentUser.fullname;
         wsProvider.awareness.setLocalStateField('user', { name: fullname, color: '#ffb61e'});
         collabService.bindDoc(doc).setAwareness(wsProvider.awareness);
-        wsProvider.once('synced', async (isSynced) => {
-            if (isSynced) {
-                collabService
-                .applyTemplate(template, (remoteNode, templateNode) => {
-                    // if no remote node content, apply current to displaySource
-                    if (remoteNode.textContent.length === 0) {
-                        vm.viewVM.displaySource(template);
-                        return true;
-                    } else {
-                        const view = ctx.get(mCore.editorViewCtx);
-                        const serializer = ctx.get(mCore.serializerCtx);
-                        const toMarkdown = serializer(remoteNode);
-                        vm.viewVM.displaySource(toMarkdown);
-                        return false;
-                    }
-                })
-                .connect();
-            }
-        });
+
+        const connectCollab = async function() {
+            // A provider reused after Close may not have a fresh list of remote
+            // editors. Ask the server explicitly before deciding whether it is
+            // safe to replace the collaborative document with the DB version.
+            requestAwarenessRefresh(wsProvider);
+            await waitForAwarenessSettlement();
+            const preferServerTemplate = !hasOtherAwarenessConnections(wsProvider);
+
+            collabService
+            .applyTemplate(template, (remoteNode, templateNode) => {
+                // Use the saved DB content when nobody else is editing. If another
+                // client is editing, preserve and join the live collaborative state.
+                if (preferServerTemplate || remoteNode.textContent.length === 0) {
+                    vm.viewVM.displaySource(template);
+                    return true;
+                } else {
+                    const view = ctx.get(mCore.editorViewCtx);
+                    const serializer = ctx.get(mCore.serializerCtx);
+                    const toMarkdown = serializer(remoteNode);
+                    vm.viewVM.displaySource(toMarkdown);
+                    return false;
+                }
+            })
+            .connect();
+
+            // Connecting the collab plugin rebuilds the editor state and can
+            // remove focus from an empty/new page. Restore it after setup.
+            const view = ctx.get(mCore.editorViewCtx);
+            view.focus();
+        };
+
+        // Re-edit after close may reuse an already-synced provider
+        if (wsProvider.synced) {
+            connectCollab();
+        } else {
+            wsProvider.once('synced', async (isSynced) => {
+                if (isSynced) {
+                    connectCollab();
+                }
+            });
+        }
     });
 
+    return mEdit;
+}
+
+function ensureMEditor(vm, template) {
+    if (mEdit && typeof mEdit.action === 'function') {
+        return Promise.resolve(mEdit);
+    }
+    if (editorLoadPromise) {
+        return editorLoadPromise;
+    }
+
+    editorLoadPromise = createMEditor(mEdit, vm, template).then(
+        function(editor) {
+            editorLoadPromise = null;
+            return editor;
+        },
+        function(error) {
+            editorLoadPromise = null;
+            throw error;
+        }
+    );
+    return editorLoadPromise;
 }
 
 function ViewWidget(visible, version, viewText, rendered, contentURL, allowMathjaxification, allowFullRender, editor) {
@@ -237,14 +393,7 @@ function ViewWidget(visible, version, viewText, rendered, contentURL, allowMathj
         var requestURL;
         if (typeof self.version() !== 'undefined') {
             if (self.version() === 'preview') {
-                var toMarkdown = '';
-                if (mEdit !== undefined) {
-                    mEdit.action((ctx) => {
-                        const view = ctx.get(mCore.editorViewCtx);
-                        const serializer = ctx.get(mCore.serializerCtx);
-                        toMarkdown = serializer(view.state.doc);
-                    });
-                }
+                var toMarkdown = getEditorMarkdown();
                 self.displaySource(toMarkdown);
                 if (document.getElementById("editWysiwyg").style.display === "none"){
                     document.getElementById("mMenuBar").style.display = "";
@@ -524,7 +673,7 @@ function ViewModel(options){
                 rawContent = resp.wiki_content;
             }
             if ((self.viewVersion() === 'preview' )) {
-                mEdit = createMEditor(mEdit, self, rawContent);
+                ensureMEditor(self, rawContent);
             }
         });
     }
@@ -539,7 +688,7 @@ function ViewModel(options){
                 self.viewVersion('preview');
             }
         }
-        
+
         if (panel === 'compare') {
             if(display && self.compareVis()){
                 self.viewVersion('preview');
@@ -552,7 +701,7 @@ function ViewModel(options){
                 self.viewVM.displaySource(toMarkdown);
             }
         }
-        
+
     });
 
     bodyElement.on('toggleMenu', function(event, menuVisible) {
@@ -606,13 +755,13 @@ function ViewModel(options){
 
             linkHref.value = '';
             linkTitle.value = '';
-    
+
             state.doc.nodesBetween(from, to, (node, pos) => {
                 const linkMark = node.marks.find(mark => mark.type === markType);
                 if (linkMark) {
                     const href = linkMark.attrs.href || '';
                     const title = linkMark.attrs.title || '';
-                    
+
                     linkHref.value = href;
                     linkTitle.value = title;
                 }
@@ -627,14 +776,14 @@ function ViewModel(options){
             const state = view.state;
             const { from, to } = state.selection;
             const markType = ctx.get(mCore.schemaCtx).marks.link;
-            
+
             let hasLink = false;
             state.doc.nodesBetween(from, to, node => {
                 if (node.marks.some(mark => mark.type === markType)) {
                     hasLink = true;
                 }
             });
-    
+
             if (hasLink && linkHref.value === '') {
                 mUtils.callCommand(mCommonmark.toggleLinkCommand.key, {})(ctx);
             } else if (hasLink && linkHref.value !== '') {
@@ -670,7 +819,7 @@ function ViewModel(options){
             imageTitle.value = '';
             imageAlt.value = '';
             imageWidth.value = '';
-            
+
             state.doc.nodesBetween(from, to, (node, pos) => {
                 if (node.type === imageType) {
                     const src = node.attrs.src || '';
@@ -699,7 +848,7 @@ function ViewModel(options){
             const state = view.state;
             const { from, to } = state.selection;
             const imageType = ctx.get(mCore.schemaCtx).nodes.image;
-            
+
             var hasImage = false;
 
             state.doc.nodesBetween(from, to, (node) => {
@@ -793,7 +942,7 @@ function ViewModel(options){
             const view = ctx.get(mCore.editorViewCtx);
             const state = view.state;
             const parser = ctx.get(mCore.parserCtx);
-    
+
             const nodes = view.state.doc.content.content;
 
             const mokuji = nodes
@@ -806,7 +955,7 @@ function ViewModel(options){
                     const listPrefix = '* '.repeat(headingLevel);
                     return listPrefix + '[' + headingText + ']' + '(#' + headingId + ')';
                 });
-            
+
             const markdownText = mokuji.join('\n');
             const listNode = parser(markdownText);
             var pos = state.selection.from;
@@ -815,7 +964,7 @@ function ViewModel(options){
             view.dispatch(tr);
             view.focus();
         });
-    }; 
+    };
 
     self.color = ko.observable('#000000');
     self.colortext = function() {
@@ -830,7 +979,7 @@ function ViewModel(options){
                 }
                 return state.doc.rangeHasMark(r.$from.pos - 1, r.$to.pos, colortextSchema.type(ctx));
             });
-            
+
             if (colortextMarkExists) {
                 if (self.color() !== '#000000') {
                     mUtils.callCommand(toggleColortextCommand.key, self.color())(ctx);
@@ -926,7 +1075,7 @@ function ViewModel(options){
     });
 
     document.addEventListener('click', (event) => {
-        if (event.target.closest('#mEditor')) {
+        if (event.target.closest('#mEditor') && mEdit && typeof mEdit.action === 'function') {
             mEdit.action((ctx) => {
                 const view = ctx.get(mCore.editorViewCtx);
                 view.focus();
@@ -940,11 +1089,21 @@ function ViewModel(options){
     self.editMode = function() {
       if(self.canEdit) {
         readonly = false;
+        refreshEditorEditable();
         document.getElementById("mMenuBar").style.display = "";
         document.getElementById("editWysiwyg").style.display = "none";
         document.getElementById("mEditorFooter").style.display = "";
         const milkdownDivs = document.getElementById("mEditor").querySelectorAll('div.milkdown');
-        if (milkdownDivs.length === 0) {
+        const needsEditor = milkdownDivs.length === 0 || !mEdit || typeof mEdit.action !== 'function';
+        if (needsEditor) {
+            // Close leaves the provider connected so other editors are not
+            // disturbed. On re-edit, discard only this tab's old in-memory
+            // session and reconnect to obtain a fresh remote document and
+            // awareness state.
+            if (wsProvider && !editorLoadPromise) {
+                resetLocalCollabSession();
+            }
+            milkdownDivs.forEach(function(div) { div.remove(); });
             var request = $.ajax({
                 url: self.contentURL
             });
@@ -953,7 +1112,7 @@ function ViewModel(options){
                 if (resp.wiki_content){
                     rawContent = resp.wiki_content;
                 }
-                mEdit = createMEditor(mEdit, self, rawContent);
+                ensureMEditor(self, rawContent).then(refreshEditorEditable);
             });
         }
         self.viewVersion('preview');
@@ -961,19 +1120,55 @@ function ViewModel(options){
     };
 
     self.editModeOff = function() {
+        var currentContent = getEditorMarkdown();
+
+        if (currentContent !== originalContent) {
+            $('#closeConfirmModal').modal('show');
+        } else {
+            self.cleanupAndClose();
+        }
+    };
+
+    self.cleanupAndClose = function() {
+        // Clear local IndexedDB cache only. Keep y-websocket connection and Y.Doc
+        // alive until this tab re-enters editing. Re-editing then reconnects with
+        // a fresh local document without clearing the server-side shared document.
+        clearIndexeddbCache();
+
+        if (wsProvider) {
+            wsProvider.awareness.setLocalState(null);
+        }
+
+        if (mEdit && mEdit.destroy) {
+            mEdit.destroy();
+            mEdit = null;
+        }
+
         readonly = true;
         document.getElementById("mMenuBar").style.display = "none";
         document.getElementById("mEditorFooter").style.display = "none";
         document.getElementById("editWysiwyg").style.display = "";
+        self.viewVersion('current');
+    };
+
+    self.discardAndClose = function() {
+        $('#closeConfirmModal').modal('hide');
+        self.cleanupAndClose();
+    };
+
+    self.saveAndClose = function() {
+        $('#closeConfirmModal').modal('hide');
+        self.submitMText();
     };
 
     self.submitMText = function() {
-        var toMarkdown = '';
-        mEdit.action((ctx) => {
-            const view = ctx.get(mCore.editorViewCtx);
-            const serializer = ctx.get(mCore.serializerCtx);
-            toMarkdown = serializer(view.state.doc);
-        });
+        var toMarkdown = getEditorMarkdown();
+
+        clearIndexeddbCache();
+
+        // Prevent beforeunload warning on intentional save navigation
+        isNavigatingAfterSave = true;
+
         var pageUrl = window.contextVars.wiki.urls.page;
         $.ajax({
             url:pageUrl,
@@ -984,11 +1179,25 @@ function ViewModel(options){
             const reloadUrl = (location.href).replace(location.search, '');
             window.location.assign(reloadUrl);
         }).fail(function(xhr) {
+            isNavigatingAfterSave = false;
             var resp = JSON.parse(xhr.responseText);
             var message = resp.message;
             alert(message);
         });
     };
+    $(window).on('beforeunload', function() {
+        if (isNavigatingAfterSave) {
+            return;
+        }
+        if (!readonly && mEdit) {
+            var currentContent = getEditorMarkdown();
+            if (currentContent !== originalContent) {
+                return _('There are unsaved changes to your wiki. If you exit ') +
+                    _('the page now, those changes may be lost.');
+            }
+        }
+    });
+
     self.imageSrcInput = ko.observable('');
     self.imageWidthInput = ko.observable('');
     self.canAddImage = ko.observable(false);
@@ -996,7 +1205,7 @@ function ViewModel(options){
 
     self.validateInputs = function () {
         const width = self.imageWidthInput().trim();
-    
+
         const sizePattern = /^(\d+|\d+%)$/;
 
         const isValidSrc = document.getElementById("imageSrc").value !== '';
@@ -1208,11 +1417,10 @@ var WikiPageMilkdown = function(selector, options) {
                 if (resp.wiki_content){
                     rawContent = resp.wiki_content;
                 }
-                mEdit = createMEditor(mEdit, self.viewModel, rawContent);
+                ensureMEditor(self.viewModel, rawContent);
             });
         }
     });
 };
 
 export default WikiPageMilkdown;
-
