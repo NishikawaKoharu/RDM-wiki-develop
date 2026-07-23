@@ -1119,11 +1119,28 @@ function ViewModel(options){
       }
     };
 
+    self.leaveCollaborativeEditMode = function() {
+        // Match pre-fix Close behavior during collaborative editing: leave the
+        // shared live preview visible (viewVersion stays "preview"), keep the
+        // editor instance, and only drop this client's awareness + local cache.
+        clearIndexeddbCache();
+
+        if (wsProvider) {
+            wsProvider.awareness.setLocalState(null);
+        }
+
+        readonly = true;
+        refreshEditorEditable();
+        document.getElementById("mMenuBar").style.display = "none";
+        document.getElementById("mEditorFooter").style.display = "none";
+        document.getElementById("editWysiwyg").style.display = "";
+    };
+    
     self.editModeOff = function() {
         // During collaborative editing, Close only leaves the shared session for
         // other editors. Showing "Discard" would be misleading, so skip the dialog.
         if (hasOtherAwarenessConnections(wsProvider)) {
-            self.cleanupAndClose();
+            self.leaveCollaborativeEditMode();
             return;
         }
         var currentContent = getEditorMarkdown();
