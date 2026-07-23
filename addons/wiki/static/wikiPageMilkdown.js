@@ -94,6 +94,19 @@ function hasOtherAwarenessConnections(provider) {
     return hasOtherConnections;
 }
 
+function setLocalAwarenessUser(provider) {
+    if (!provider || !provider.awareness) {
+        return;
+    }
+
+    const fullname = window.contextVars.currentUser.fullname;
+    const user = { name: fullname, color: '#ffb61e' };
+    // After setLocalState(null), setLocalStateField is a no-op because
+    // getLocalState() is null. Rebuild local state explicitly.
+    const state = provider.awareness.getLocalState() || {};
+    provider.awareness.setLocalState(Object.assign({}, state, { user: user }));
+}
+
 function waitForAwarenessSettlement() {
     return new Promise(function(resolve) {
         setTimeout(resolve, AWARENESS_SETTLE_MS);
@@ -298,8 +311,7 @@ async function createMEditor(editor, vm, template) {
             });
             wsStatusHandlersBound = true;
         }
-        const fullname = window.contextVars.currentUser.fullname;
-        wsProvider.awareness.setLocalStateField('user', { name: fullname, color: '#ffb61e'});
+        setLocalAwarenessUser(wsProvider);
         collabService.bindDoc(doc).setAwareness(wsProvider.awareness);
 
         const connectCollab = async function() {
@@ -1114,6 +1126,10 @@ function ViewModel(options){
                 }
                 ensureMEditor(self, rawContent).then(refreshEditorEditable);
             });
+        } else {
+            // Collaborative Close clears awareness but keeps the editor.
+            // Re-announce this user when re-entering edit mode.
+            setLocalAwarenessUser(wsProvider);
         }
         self.viewVersion('preview');
       }
@@ -1135,7 +1151,7 @@ function ViewModel(options){
         document.getElementById("mEditorFooter").style.display = "none";
         document.getElementById("editWysiwyg").style.display = "";
     };
-    
+
     self.editModeOff = function() {
         // During collaborative editing, Close only leaves the shared session for
         // other editors. Showing "Discard" would be misleading, so skip the dialog.
@@ -1143,6 +1159,7 @@ function ViewModel(options){
             self.leaveCollaborativeEditMode();
             return;
         }
+
         var currentContent = getEditorMarkdown();
 
         if (currentContent !== originalContent) {
