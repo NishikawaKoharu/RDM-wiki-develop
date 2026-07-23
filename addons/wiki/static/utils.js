@@ -3,7 +3,7 @@
 function isParent(node) {
     return !!(node && node.children && Array.isArray(node.children));
   }
-  
+
 export function isLiteral(node) {
     return !!(node && typeof node.value === 'string');
   }
@@ -14,16 +14,183 @@ export function flatMap(ast, fn) {
     function transform(node, index, parent) {
         if (isParent(node)) {
             const out = [];
-            for (var i = 0, n = node.children.length; i < n; i++) {
-                const nthChild = node.children[i];
+            //#51315 Add Start 訂正線とコードブロック対応
+            for (var i = 0 ; i < node.children.length ; i++) {
+                if (node.children[i] && node.children[i].type === 'text' && node.children[i].value.match(/.*\~\~.*$/)) {
+                    // 取り消し線が設定済みの場合
+                    node.children = deleteChange(node);
+                    break;
+                }
+            }
+            //#51315 Add End 訂正線とコードブロック対応
+            // リスト項目内の見出しを先に処理（他の処理より先に実行）
+            if (node.type && (node.type === 'listItem' || node.type === 'bulletListItem' || node.type === 'orderedListItem')) {
+                for (var listCnt = 0; listCnt < node.children.length; listCnt++) {
+                    if (node.children[listCnt]) {
+                        // 段落ノードの場合
+                        if (node.children[listCnt].type === 'paragraph' && node.children[listCnt].children && node.children[listCnt].children.length > 0) {
+                            // 段落内のすべての子要素を確認
+                            for (var paraCnt = 0; paraCnt < node.children[listCnt].children.length; paraCnt++) {
+                                const paragraphChild = node.children[listCnt].children[paraCnt];
+                                if (paragraphChild && paragraphChild.type === 'text' && paragraphChild.value) {
+                                    const textValue = paragraphChild.value;
+                                    // #で始まる見出し記法を検出
+                                    if (/^#{1,6}\s/.test(textValue)) {
+                                        // 段落ノード全体を見出しノードに置き換え
+                                        const headingMatch = textValue.match(/^(#{1,6})\s(.+)$/);
+                                        if (headingMatch) {
+                                            const level = headingMatch[1].length;
+                                            const headingText = headingMatch[2];
+                                            // 見出しノードを作成
+                                            const headingNode = {
+                                                type: 'heading',
+                                                level: level,
+                                                children: [{ type: 'text', value: headingText }]
+                                            };
+                                            // 段落ノードを直接見出しノードに置き換え
+                                            node.children[listCnt] = headingNode;
+                                        }
+                                        // 変換後はループを抜ける
+                                        listCnt = node.children.length; // 外側のループも抜ける
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // テキストノードの場合（直接テキストが含まれている場合）
+                        else if (node.children[listCnt].type === 'text' && node.children[listCnt].value) {
+                            const textValue = node.children[listCnt].value;
+                            // #で始まる見出し記法を検出
+                            if (/^#{1,6}\s/.test(textValue)) {
+                                transformListItemHeading(node, listCnt);
+                                break; // 変換後はループを抜ける
+                            }
+                        }
+                    }
+                }
+            }
+            for (var sCnt = 0 ; sCnt < node.children.length ; sCnt++) {
+                //#48569 Add Start 子アンカー対応
+                // @[osf](GUID)形式のリンクを画像ノードに変換（エンコードされていない形式）
+                try {
+                    if (node.children[sCnt] && node.children[sCnt].type === 'link' &&
+                        node.children[sCnt].url && /^[a-zA-Z0-9]{5,}$/.test(node.children[sCnt].url) &&
+                        node.children[sCnt].children && node.children[sCnt].children.length > 0 &&
+                        node.children[sCnt].children[0] && node.children[sCnt].children[0].type === 'text' &&
+                        node.children[sCnt].children[0].value === 'osf' &&
+                        sCnt > 0 && node.children[sCnt - 1] && node.children[sCnt - 1].type === 'text' &&
+                        node.children[sCnt - 1].value === '@') {
+                        // @[osf](GUID)形式を画像ノードに変換
+                        const guid = node.children[sCnt].url;
+                        const osfURL = (typeof window !== 'undefined' && window.contextVars && window.contextVars.osfURL) ? window.contextVars.osfURL : '';
+                        let imageUrl = osfURL + guid + '/?action=download&mode=render';
+                        const $osfHelper = (typeof window !== 'undefined' && window.$osf && typeof window.$osf.urlParams === 'function') ? window.$osf : null;
+                        if ($osfHelper && $osfHelper.urlParams) {
+                            try {
+                                const urlParams = $osfHelper.urlParams();
+                                if (urlParams && urlParams.view_only) {
+                                    imageUrl += '&view_only=' + urlParams.view_only;
+                                }
+                            } catch (e) {
+                                // urlParams()がエラーを返す場合は無視
+                            }
+                        }
+                        // @テキストノードとリンクノードを画像ノードに置き換え
+                        node.children.splice(sCnt - 1, 2, {
+                            type: 'image',
+                            alt: guid,
+                            url: imageUrl
+                        });
+                        sCnt--; // インデックスを調整
+                        continue;
+                    }
+                } catch (e) {
+                    // エラーが発生した場合は処理を続行（Wikiの表示を妨げない）
+                    console.error('Error processing @[osf] link:', e);
+                }
+                if (node.children[sCnt] && node.children[sCnt].type === 'link') {
+
+                    // URLにアンカーが存在する場合
+                    if(window.location.hash){
+                        node.children[sCnt].url = node.children[sCnt].url.replace('\.\.\/','\.\/');
+                    }
+                }
+                //#48569 Add End 子アンカー対応
+                //#54471 バックスラッシュ付きのリンクについては、マークダウン内でエスケープされているため、表示する際に、エスケープ用のバックスラッシュを非表示にする
+                if (node.children[sCnt].type === 'link' && node.children[sCnt].url && node.children[sCnt].url.match(/.*\\.*$/)) {
+                    node.children[sCnt].url = node.children[sCnt].url.replaceAll('\\','');
+                    if(node.children[sCnt].children[0] && node.children[sCnt].children[0].value){
+                        node.children[sCnt].children[0].value = node.children[sCnt].children[0].value.replaceAll('\\','');
+                    }
+                }
+                //#51297 Add Start 下線文字色対応
+                if (node.children[sCnt] && node.children[sCnt].type === 'text' && node.children[sCnt].value ) {
+                    // #56408 表示できないページの対応 Mod Start
+                    //if(/\*</.test(node.children[sCnt].value)) {
+                    if(/\*<span/.test(node.children[sCnt].value) || /\*<u/.test(node.children[sCnt].value )) {
+                    // #56408 表示できないページの対応 Mod End
+                        // 太文字かイタリックが存在した場合（下線or文字色と同時の場合のみ）
+                        subTransFormStrong(node,sCnt);
+                    }
+                    // subTransFormStrongでnode.childrenが変更される可能性があるため、再度チェック
+                    if (node.children[sCnt] && node.children[sCnt].type === 'text' && node.children[sCnt].value && typeof node.children[sCnt].value === 'string') {
+                        const currentValue = node.children[sCnt].value;
+
+                        const indexULine = currentValue.indexOf('<u>');
+                        const indexColor = currentValue.indexOf('<span style=\"color\:');
+                        if(indexULine >= 0 && indexColor >=0){
+                            // どちらも存在した場合
+                            if(indexULine < indexColor){
+                                // 下線の方が先
+                                subTransForm(node,'u',sCnt);
+                            }else{
+                                // 文字色の方が先
+                                subTransForm(node, 'span',sCnt);
+                            }
+                        // 下線の場合
+                        }else if(/<u>/.test(currentValue)) {
+                            subTransForm(node,'u',sCnt);
+                        // 文字色の場合
+                        }else if (/<span style=\"color\:/.test(currentValue)) {
+                            subTransForm(node, 'span',sCnt);
+                        }
+                    }
+                }
+                // 見出し内の太字対応
+                if (node.type && (node.type === 'heading' || node.type.startsWith('h')) && node.children[sCnt] && node.children[sCnt].type === 'text' && node.children[sCnt].value) {
+                    const textValue = node.children[sCnt].value;
+                    // **で囲まれた太字を検出
+                    if (/\*\*.*?\*\*/.test(textValue)) {
+                        transformHeadingBold(node, sCnt);
+                    }
+                }
+            }
+            //#47039 Add End 下線文字色対応
+            for (var uLineCnt = 0, n = node.children.length; uLineCnt < n; uLineCnt++) {
+                const nthChild = node.children[uLineCnt];
                 if (nthChild) {
-                    if (nthChild.type === 'text' && /.*!\[.*\]\($/.test(nthChild.value)) {
-                        const remainingChildren = getRemainingNode(i, node.children);
+                    if (nthChild.type === 'text' && /.*!\[.*\]\($/.test(nthChild.value) ) {
+                        const remainingChildren = getRemainingNode(uLineCnt, node.children);
                         const transformedChildren = transformImageSection(remainingChildren);
-                        out.push(...transformedChildren)
+                        out.push(...transformedChildren);
                         break;
+                    //#49455 Add Start リンク付き画像対応
+                    }else if (nthChild.type === 'text' && /.*!\[.*\]\(.*$/.test(nthChild.value) ) {
+                        const remainingChildren = getRemainingNode(uLineCnt, node.children);
+                        const transformedChildren = transformImageSection(remainingChildren);
+                        out.push(...transformedChildren);
+                        break;
+                    //#49455 Add End リンク付き画像対応
+                    } else if (nthChild.type === 'text' && /@(?:\\\[|\[)osf(?:\\\]|\])\(/.test(nthChild.value)) {
+                        // Handle @[osf](GUID) format (both escaped and unescaped)
+                        const transformed = transformOsfImage(nthChild);
+                        if (transformed && transformed.length > 0) {
+                            out.push(...transformed);
+                        } else {
+                            addTransformedChildren(nthChild, uLineCnt, node, out);
+                        }
                     } else {
-                        addTransformedChildren(nthChild, i, node, out);
+                        addTransformedChildren(nthChild, uLineCnt, node, out);
                     }
                 }
             }
@@ -40,6 +207,47 @@ export function flatMap(ast, fn) {
                 if (item) out.push(item);
             }
         }
+    }
+
+  function transformOsfImage(textNode) {
+      // @[osf](GUID) のパターン（エスケープされた形式とエスケープされていない形式の両方に対応）
+      const osfImagePattern = /@(?:\\\[|\[)osf(?:\\\]|\])\(([a-zA-Z0-9]{5,})\)/g;
+      const text = textNode.value;
+      const matches = [];
+      let lastIndex = 0;
+      let match;
+
+      while ((match = osfImagePattern.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+            matches.push({ type: 'text', value: text.substring(lastIndex, match.index) });
+        }
+
+        // @[osf](GUID)からURLを作る
+        const guid = match[1];
+        const osfURL = window.contextVars && window.contextVars.osfURL ? window.contextVars.osfURL : '';
+        let imageUrl = osfURL + guid + '/?action=download&mode=render';
+
+        const $osfHelper = (typeof window !== 'undefined' && window.$osf && typeof window.$osf.urlParams === 'function') ? window.$osf : null;
+
+        if ($osfHelper && $osfHelper.urlParams && $osfHelper.urlParams().view_only) {
+            imageUrl += '&view_only=' + $osfHelper.urlParams().view_only;
+        }
+
+        matches.push({
+            type: 'image',
+            alt: guid,
+            url: imageUrl
+        });
+
+        lastIndex = osfImagePattern.lastIndex;
+    }
+
+    // Add remaining text after the last match
+    if (lastIndex < text.length) {
+        matches.push({ type: 'text', value: text.substring(lastIndex) });
+    }
+
+      return matches.length > 0 ? matches : null;
     }
 
   function transformImageSection(remainingChildren) {
@@ -93,12 +301,470 @@ export function flatMap(ast, fn) {
                       }
                   }
                   continue;
-              }
-          }
-          remainingChildren.push(nodeChildren[i])
+//#49455 Add Start リンク付き画像対応
+                }else if (nodeChildren[i].value.match(/!\[\]\(.*\)$/)) {
+                    const matchBeforeImage = nodeChildren[i].value.match(/(.*=.*)/);
+                    if (matchBeforeImage[0] !== '') {
+                        const beforeImage = matchBeforeImage[0];
+                        const imageUrl = beforeImage.replace('\!\[\]\(','').replace('\)','');
+                        if (imageUrl) {
+                            remainingChildren.push({type: 'image', url: imageUrl, title: null, alt: ''});
+                        }
+                    }
+                    continue;
+                }
+//#49455 Add End リンク付き画像対応
+            }
+            remainingChildren.push(nodeChildren[i]);
       }
       return remainingChildren;
-  }
+    }
+
+    //#47039 Add Start 下線文字色対応
+    // 文字色と下線の処理
+    function subTransForm(node, tagText, startCnt){
+        var textChildren = [];  // 戻りの配列
+
+        var textStartChildren = [];  // 最初の文字列の配列
+
+        // 文字列を分解する
+        startCnt = splitTags(node,startCnt);
+
+        // 以前のデータも詰め込む
+        if(startCnt > 0){
+            textStartChildren = node.children.slice(0,startCnt);
+        }
+        var endCnt = startCnt;
+        var endTag = '<\/' + tagText + '>';
+        for(var i = startCnt ; i < node.children.length ; i++) {
+            if(tagText === 'span'){
+                if(node.children[i].type === 'text' && /<\/span>/.test(node.children[i].value)) {
+                    // 終わりのタグ位置を調べる
+                    endCnt = i;
+                    break;
+                } 
+            }else if(tagText === 'u'){
+                if(node.children[i].type === 'text' && /<\/u>/.test(node.children[i].value)) {
+                    // 終わりのタグ位置を調べる
+                    endCnt = i;
+                    break;
+                } 
+            }
+    
+        }
+        if(endCnt !== node.children.length) {
+            var retrunNode =[];  // 戻り値
+            var openTags  = '';  // 開始タグの前
+            var closeTags = '';  // 終了タグの前
+            if(tagText ===  'u'){
+                // 下線の場合
+                retrunNode = { type: 'underline' };
+                openTags = node.children[startCnt].value.replace(/<u>/, '');
+            }else if(tagText === 'span'){
+                // 文字色の場合
+                var colorNameOrg = node.children[startCnt].value.replace(/<span style=\"color:/, '').replace(/\">.*/, '');
+                var colorName = colorNameOrg.trimStart();
+                if(/.*<\/span>/.test(colorName)){
+                    colorName = colorName.replace(/\".*<\/span>/, '');
+                }
+                retrunNode = { type: 'colortext' ,color : colorName};
+                openTags = node.children[startCnt].value.replace('<span style=\"color:' + colorNameOrg + '\">', '');
+            }
+
+            // 終了タグがある文字列を分割する
+            splitTags(node,endCnt);
+            // 再度終了タグの場所を探す
+            for(var nextEnd = startCnt ; nextEnd < node.children.length ; nextEnd++) {
+                if(tagText === 'span'){
+                    if(node.children[nextEnd].type === 'text' && /<\/span>/.test(node.children[nextEnd].value)) {
+                        // 終わりのタグ位置を調べる
+                        endCnt = nextEnd;
+                        break;
+                    } 
+                }else if(tagText === 'u'){
+                    if(node.children[nextEnd].type === 'text' && /<\/u>/.test(node.children[nextEnd].value)) {
+                        // 終わりのタグ位置を調べる
+                        endCnt = nextEnd;
+                        break;
+                    } 
+                } 
+            }
+            // クローズタグを消した値を設定する
+            closeTags = node.children[endCnt].value.replace(endTag, '');
+
+            var remainingChildren = [];
+            if (endCnt === startCnt){
+                // 同一ノード内にOpenとCloseがある場合
+                var openCloseTag = openTags.replace(endTag, '');
+                if (openTags.length > 0) {
+                    remainingChildren.push({ type: 'text', value: openCloseTag});
+                }
+            }else{
+                if (openTags.length > 0) {
+                    remainingChildren.push({ type: 'text', value: openTags});
+                }
+                remainingChildren = remainingChildren.concat(node.children.slice(startCnt + 1, endCnt));
+                if (closeTags.length > 0) {
+                    remainingChildren.push({ type: 'text', value: closeTags});
+                }
+            }
+            //ノードを詰め込む
+            const out = [];
+            for (var cldLen = 0, n = remainingChildren.length; cldLen < n; cldLen++) {
+                const nthChild = remainingChildren[cldLen];
+                if (nthChild) {
+                    addTransformedChildren(nthChild, cldLen, node, out);
+                }
+            }
+            retrunNode.children = out;
+
+            if(textStartChildren !== ''){
+                textChildren = textStartChildren.concat(retrunNode);
+            }else{
+                textChildren = retrunNode;
+            }
+
+            // 以降のデータも詰め込む
+            if(endCnt < node.children.length-1){
+                var tailNode =[];
+                tailNode.children = node.children.slice(endCnt+1);
+                const xs2 = transform(tailNode, 0, textChildren);
+                textChildren = textChildren.concat(xs2[0].children);
+            }
+            node.children = textChildren;
+        }
+    }
+
+    // 太文字とイタリックの変換修正対応
+    function subTransFormStrong(node,startCnt){
+        var remainingChildren = [];
+        var remainingChildren2 = [];
+        // #56408 ページが表示できない件の対応 Mod Start
+        //var frontStr = node.children[startCnt].value.replace(/\*{1,3}<.*/,'');       // アスタリスク前
+        // 開始位置を把握
+        var frontStr = '';
+        if(/\*<span/.test(node.children[startCnt].value)){
+            frontStr = node.children[startCnt].value.replace(/\*{1,3}<span.*/,'');
+        }else if(/\*<u/.test(node.children[startCnt].value )) {
+            frontStr = node.children[startCnt].value.replace(/\*{1,3}<u.*/,'');
+        }else{
+            return;
+        }
+        // #56408 ページが表示できない件の対応 Mod End
+        var endCnt = startCnt;
+        var strChildren = [];
+        // 終わりの場所を調べる
+        for(var i=startCnt ; i<node.children.length ; i++){
+            // #56408 ページが表示できない件の対応 Mod Start
+            //if(node.children[i].value && (node.children[i].value.match(/.*\>\*{1,3}/) || []).length === 1){
+            const v = node.children[i] && node.children[i].value;
+            if (v && (/.*\u>\*{1,3}/.test(v) || /.*\span>\*{1,3}/.test(v))) {
+                // #56408 ページが表示できない件の対応 Mod End
+                endCnt = i;
+                break;
+            }
+        }
+        var tailStr = node.children[endCnt] && node.children[endCnt].value ? node.children[endCnt].value.replace(/.*\>\*{1,3}/,'') : '';   // アスタリスク後
+        if(endCnt >= 1 ){
+            for(var tailCnt=1 ; tailCnt<endCnt ; tailCnt++){
+                strChildren.push(node.children[tailCnt]);
+            }
+        }else{
+            var str = node.children[startCnt].value.replace(frontStr,'').replace(tailStr,'').replace(/\*/g,''); // アスタリスクの中
+            strChildren.push({type: 'text', value: str});
+        }
+
+        if(strChildren){
+            remainingChildren.push({type: 'text' , value: frontStr});
+            if((node.children[startCnt].value.match(/\*\*\*</g) || []).length === 1){
+                //太文字とイタリックがある
+                var stEmpChildren =[];
+                stEmpChildren = ({ type: 'strong' });
+                stEmpChildren.children = strChildren;
+                remainingChildren2 = ({ type: 'emphasis' });
+                remainingChildren2.children = [stEmpChildren];
+            }else if((node.children[startCnt].value.match(/\*\*</g) || []).length === 1){
+                //太文字だけある
+                remainingChildren2 = ({ type: 'strong'});
+                remainingChildren2.children = strChildren;
+            }else if((node.children[startCnt].value.match(/\*</g) || []).length === 1){
+                //イタリックがある
+                remainingChildren2 = ({ type: 'emphasis'});
+                remainingChildren2.children = strChildren;
+            }else{
+                //何もない
+                return;
+            }
+            if(remainingChildren2 !== ''){
+                remainingChildren.push(remainingChildren2);
+            }
+            remainingChildren.push({type: 'text' , value: tailStr});
+
+            // ノードの２番目に挿入
+            node.children.splice( 0, endCnt+1 );        // 変換したノードを削除
+            Array.prototype.splice.apply(node.children,[1,0].concat(remainingChildren));    //　ノードを追加
+        }
+    }
+
+    // 文字分割処理
+    function splitTags(node, spritCnt){
+        var tmpNode = [];
+        var tmpText = '';
+        var itemData = node.children[spritCnt].value.split('<');    // 文字列分割
+
+        for(var j=0 ; j < itemData.length ; j++){
+            if(itemData[j].startsWith('span style')){
+                tmpText = '<' + itemData[j];
+                tmpNode.push({type: 'text' ,value : tmpText});
+                tmpText = '';
+            }else if(itemData[j].startsWith('u>')){
+                tmpText = '<' + itemData[j];
+                tmpNode.push({type: 'text' ,value : tmpText});
+                tmpText = '';
+            }else if(itemData[j].startsWith('\/span>')){
+                tmpText = tmpText + '<\/span>';
+                tmpNode.push({type: 'text' ,value : tmpText});
+                if(itemData[j] !== '\/span>'){
+                    // 終了タグだけではない場合、終了タグを取り除いた値を設定
+                    tmpNode.push({type: 'text' ,value : itemData[j].replace('\/span>','')});
+                }
+                tmpText = '';
+            }else if(itemData[j].startsWith('\/u>')){
+                tmpText = tmpText + '<\/u>';
+                tmpNode.push({type: 'text' ,value : tmpText});
+                if(itemData[j] !== '\/u>'){
+                    // 終了タグだけではない場合、終了タグを取り除いた値を設定
+                    tmpNode.push({type: 'text' ,value : itemData[j].replace('\/u>','')});
+                }
+                tmpText = '';
+            // #54864 開始タグと終了タグのみだった場合の対応
+            }else if(itemData[j] !== '' && itemData[j].startsWith('\>')){
+                tmpText = '<' + itemData[j];
+                // #56280 blockquoteと文字装飾の対応
+                if(tmpText.startsWith('<>')){
+                    tmpText = itemData[j];
+                }
+                // #56280 blockquoteと文字装飾の対応
+                tmpNode.push({type: 'text' ,value : tmpText});
+                tmpText = '';
+            // #54864 開始タグと終了タグのみだった場合の対応
+            }else if(itemData[j] !== '' && tmpText === ''){
+                tmpNode.push({type: 'text' ,value : itemData[j]});
+            }else if(itemData[j] !== '' && tmpText !== ''){
+                tmpText = tmpText + itemData[j];
+            }
+        }
+        // 残りのノードを詰め込む
+        if(tmpText !== '' ){
+            tmpNode.push({type: 'text' ,value : tmpText});
+        }
+
+        if(!(tmpNode[0].value.startsWith('<'))){
+            //最初が文字の場合はそのまま設定
+            node.children[spritCnt].value = tmpNode[0].value;
+            // 詰め込んだ先頭ノードを削除
+            tmpNode.shift();
+            Array.prototype.splice.apply(node.children,[spritCnt + 1,0].concat(tmpNode));
+            spritCnt = spritCnt + 1;
+        }else if(tmpNode[0].value.startsWith('<span') || tmpNode[0].value.startsWith('<u')){
+            // 開始タグの場合、ノードを付け替える
+            Array.prototype.splice.apply(node.children,[spritCnt + 1,0].concat(tmpNode));
+            node.children.splice(spritCnt,1);
+        }else if(tmpNode[0].value.startsWith('<\/span') || tmpNode[0].value.startsWith('<\/u')){
+            // 終了タグの場合、配列の途中に設定
+            Array.prototype.splice.apply(node.children,[spritCnt + 1,0].concat(tmpNode));
+            // 分解した配列を削除する
+            node.children.splice(spritCnt,1);
+        }
+        return spritCnt;
+    }
+    //#47039 Add End 下線文字色対応
+
+    // 見出し内の太字変換処理
+    function transformHeadingBold(node, startCnt) {
+        const textValue = node.children[startCnt].value;
+        const boldPattern = /\*\*(.*?)\*\*/g;
+        const result = [];
+        let lastIndex = 0;
+        let match;
+
+        while ((match = boldPattern.exec(textValue)) !== null) {
+            // マッチ前のテキストを追加
+            if (match.index > lastIndex) {
+                result.push({ type: 'text', value: textValue.substring(lastIndex, match.index) });
+            }
+            // 太字ノードを追加
+            result.push({
+                type: 'strong',
+                children: [{ type: 'text', value: match[1] }]
+            });
+            lastIndex = match.index + match[0].length;
+        }
+        // 残りのテキストを追加
+        if (lastIndex < textValue.length) {
+            result.push({ type: 'text', value: textValue.substring(lastIndex) });
+        }
+
+        // 結果が1つ以上ある場合、元のノードを置き換え
+        if (result.length > 0) {
+            // 元のノードを削除
+            node.children.splice(startCnt, 1);
+            // 変換されたノードを挿入
+            Array.prototype.splice.apply(node.children, [startCnt, 0].concat(result));
+        }
+    }
+
+    // リスト項目内の見出し変換処理
+    function transformListItemHeading(node, startCnt, paraChildIndex) {
+        let textValue = null;
+        let targetNode = node.children[startCnt];
+        let isParagraph = false;
+
+        // 段落ノードの中のテキストを取得
+        if (targetNode && targetNode.type === 'paragraph' && targetNode.children && targetNode.children.length > 0) {
+            isParagraph = true;
+            // paraChildIndexが指定されている場合はそのインデックスを使用、そうでなければ最初の子要素を使用
+            const childIndex = paraChildIndex !== undefined ? paraChildIndex : 0;
+            const paragraphChild = targetNode.children[childIndex];
+            if (paragraphChild && paragraphChild.type === 'text' && paragraphChild.value) {
+                textValue = paragraphChild.value;
+            }
+        } else if (targetNode && targetNode.type === 'text' && targetNode.value) {
+            textValue = targetNode.value;
+        }
+
+        if (textValue) {
+            // #の数を数えて見出しレベルを決定
+            const headingMatch = textValue.match(/^(#{1,6})\s(.+)$/);
+            if (headingMatch) {
+                const level = headingMatch[1].length;
+                const headingText = headingMatch[2];
+                // 見出しノードを作成
+                const headingNode = {
+                    type: 'heading',
+                    level: level,
+                    children: [{ type: 'text', value: headingText }]
+                };
+
+                if (isParagraph) {
+                    // 段落ノードを直接見出しノードに置き換え
+                    node.children[startCnt] = headingNode;
+                } else {
+                    // 元のノードを削除
+                    node.children.splice(startCnt, 1);
+                    // 見出しノードを挿入
+                    Array.prototype.splice.apply(node.children, [startCnt, 0].concat([headingNode]));
+                }
+            }
+        }
+    }
+
+    //#51315 Add Start 訂正線とコードブロック対応
+    function deleteChange(node){
+        var tmpNode = [];
+        var i = 0;
+
+        while (i < node.children.length) {
+            var child = node.children[i];
+
+            // 取り消し線が含まれていない場合はそのまま追加
+            if (!child || child.type !== 'text' || !child.value.match(/.*\~\~.*$/)) {
+                tmpNode.push(child);
+                i++;
+                continue;
+            }
+
+            // 取り消し線の開始位置を探す
+            var startIndex = child.value.indexOf('~~');
+            if (startIndex === -1) {
+                tmpNode.push(child);
+                i++;
+                continue;
+            }
+
+            // 開始位置より前のテキストを追加
+            if (startIndex > 0) {
+                tmpNode.push({
+                    type: 'text',
+                    value: child.value.substring(0, startIndex)
+                });
+            }
+
+            // 取り消し線の終了位置を探す
+            var remainingText = child.value.substring(startIndex + 2);
+            var endIndex = remainingText.indexOf('~~');
+            var deleteNodeChildren = [];
+            var nextChildIndex = i;
+
+            if (endIndex !== -1) {
+                // 同じテキストノード内に終了タグがある場合
+                var deleteText = remainingText.substring(0, endIndex);
+                if (deleteText) {
+                    deleteNodeChildren.push({
+                        type: 'text',
+                        value: deleteText
+                    });
+                }
+                var afterText = remainingText.substring(endIndex + 2);
+                if (afterText) {
+                    // 残りのテキストを新しいノードとして追加
+                    tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                    tmpNode.push({
+                        type: 'text',
+                        value: afterText
+                    });
+                } else {
+                    tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                }
+                i++;
+            } else {
+                // 複数のノードにまたがる場合
+                if (remainingText) {
+                    deleteNodeChildren.push({
+                        type: 'text',
+                        value: remainingText
+                    });
+                }
+                i++;
+
+                // 終了タグを探す
+                while (i < node.children.length) {
+                    var nextChild = node.children[i];
+                    if (nextChild && nextChild.type === 'text' && nextChild.value.indexOf('~~') !== -1) {
+                        var endPos = nextChild.value.indexOf('~~');
+                        if (endPos > 0) {
+                            deleteNodeChildren.push({
+                                type: 'text',
+                                value: nextChild.value.substring(0, endPos)
+                            });
+                        }
+                        var afterEndText = nextChild.value.substring(endPos + 2);
+                        if (afterEndText) {
+                            tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                            tmpNode.push({
+                                type: 'text',
+                                value: afterEndText
+                            });
+                        } else {
+                            tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                        }
+                        i++;
+                        break;
+                    } else {
+                        deleteNodeChildren.push(nextChild);
+                        i++;
+                    }
+                }
+
+                // 終了タグが見つからなかった場合
+                if (i >= node.children.length && deleteNodeChildren.length > 0) {
+                    tmpNode.push({type: 'delete', children: deleteNodeChildren});
+                }
+            }
+        }
+        return tmpNode;
+    }
+    // #51315 Add End 訂正線とコードブロック対応
 }
 
 function createImageNode(altNode, linkNode, sizeNode) {
@@ -118,3 +784,4 @@ function createImageNode(altNode, linkNode, sizeNode) {
 
     return imageNode;
 }
+
