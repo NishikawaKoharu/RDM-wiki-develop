@@ -251,8 +251,7 @@ async function createMEditor(editor, vm, template) {
                 enableHtmlFileUploader,
             }));
             const debouncedMarkdownUpdated = $osf.debounce(async (ctx, markdown, prevMarkdown) => {
-
-                const compareWidgetElement = document.getElementById("compareWidget");
+                const compareWidgetElement = document.getElementById('compareWidget');
 
                 if (compareWidgetElement && compareWidgetElement.style.display !== 'none') {
                     vm.viewVM.displaySource(markdown);
@@ -1132,10 +1131,10 @@ function ViewModel(options){
         readonly = false;
 
         refreshEditorEditable();
-        document.getElementById("mMenuBar").style.display = "";
-        document.getElementById("editWysiwyg").style.display = "none";
-        document.getElementById("mEditorFooter").style.display = "";
-        const milkdownDivs = document.getElementById("mEditor").querySelectorAll('div.milkdown');
+        document.getElementById('mMenuBar').style.display = '';
+        document.getElementById('editWysiwyg').style.display = 'none';
+        document.getElementById('mEditorFooter').style.display = '';
+        const milkdownDivs = document.getElementById('mEditor').querySelectorAll('div.milkdown');
         const needsEditor = milkdownDivs.length === 0 || !mEdit || typeof mEdit.action !== 'function';
         if (needsEditor) {
             // Close leaves the provider connected so other editors are not
@@ -1178,9 +1177,9 @@ function ViewModel(options){
 
         readonly = true;
         refreshEditorEditable();
-        document.getElementById("mMenuBar").style.display = "none";
-        document.getElementById("mEditorFooter").style.display = "none";
-        document.getElementById("editWysiwyg").style.display = "";
+        document.getElementById('mMenuBar').style.display = 'none';
+        document.getElementById('mEditorFooter').style.display = 'none';
+        document.getElementById('editWysiwyg').style.display = '';
     };
 
     self.editModeOff = function() {
@@ -1217,9 +1216,9 @@ function ViewModel(options){
 
         readonly = true;
 
-        document.getElementById("mMenuBar").style.display = "none";
-        document.getElementById("mEditorFooter").style.display = "none";
-        document.getElementById("editWysiwyg").style.display = "";
+        document.getElementById('mMenuBar').style.display = 'none';
+        document.getElementById('mEditorFooter').style.display = 'none';
+        document.getElementById('editWysiwyg').style.display = '';
         self.viewVersion('current');
     };
 
