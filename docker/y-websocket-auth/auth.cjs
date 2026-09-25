@@ -1,5 +1,5 @@
-const crypto = require('crypto')
 const url = require('url')
+const jwt = require('jsonwebtoken')
 
 const Y_WEBSOCKET_SECRET = process.env.Y_WEBSOCKET_SECRET || ''
 const Y_WEBSOCKET_ALLOWED_ORIGINS = (process.env.Y_WEBSOCKET_ALLOWED_ORIGINS || '')
@@ -7,36 +7,20 @@ const Y_WEBSOCKET_ALLOWED_ORIGINS = (process.env.Y_WEBSOCKET_ALLOWED_ORIGINS || 
   .map(origin => origin.trim())
   .filter(Boolean)
 
-function base64UrlDecode (str) {
-  str = str.replace(/-/g, '+').replace(/_/g, '/')
-  while (str.length % 4) {
-    str += '='
+function assertYWebsocketSecretConfigured () {
+  if (!Y_WEBSOCKET_SECRET) {
+    console.error('Y_WEBSOCKET_SECRET is required; refusing to start without authentication')
+    process.exit(1)
   }
-  return Buffer.from(str, 'base64')
 }
 
 function verifyJwt (token, secret) {
-  const parts = token.split('.')
-  if (parts.length !== 3) {
-    return null
-  }
-
-  const [headerB64, payloadB64, signatureB64] = parts
-  const expectedSignature = crypto
-    .createHmac('sha256', secret)
-    .update(`${headerB64}.${payloadB64}`)
-    .digest('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
-
-  if (signatureB64 !== expectedSignature) {
-    return null
-  }
-
   try {
-    const payload = JSON.parse(base64UrlDecode(payloadB64).toString('utf8'))
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+    const payload = jwt.verify(token, secret, {
+      algorithms: ['HS256']
+    })
+    // Require exp so tokens without expiry are rejected.
+    if (!payload || typeof payload !== 'object' || !payload.exp) {
       return null
     }
     return payload
@@ -62,46 +46,71 @@ function getDocIdFromRequest (request) {
   return docId || null
 }
 
+/**
+ * Read the token query parameter.
+ * Accepts only a single non-empty string.
+ * Multiple values (?token=a&token=b) become an array and are rejected.
+ */
 function getTokenFromRequest (request) {
   const parsedUrl = url.parse(request.url || '', true)
-  return parsedUrl.query.token || null
-}
+  const token = parsedUrl.query.token
 
-function isAuthEnabled () {
-  return Boolean(Y_WEBSOCKET_SECRET)
+  if (token === undefined || token === null || token === '') {
+    return { token: null }
+  }
+
+  if (typeof token !== 'string') {
+    return {
+      token: null,
+      error: 'invalid token parameter',
+      statusCode: 400
+    }
+  }
+
+  return { token }
 }
 
 function authorizeUpgrade (request) {
-  if (!isAuthEnabled()) {
-    return { authorized: true }
-  }
-
   const origin = request.headers.origin
   if (!isOriginAllowed(origin)) {
-    return { authorized: false, reason: 'origin not allowed' }
+    return { authorized: false, reason: 'origin not allowed', statusCode: 401 }
   }
 
   const docId = getDocIdFromRequest(request)
-  const token = getTokenFromRequest(request)
+  const tokenResult = getTokenFromRequest(request)
+  if (tokenResult.error) {
+    return {
+      authorized: false,
+      reason: tokenResult.error,
+      statusCode: tokenResult.statusCode || 400
+    }
+  }
+
+  const token = tokenResult.token
   if (!docId || !token) {
-    return { authorized: false, reason: 'missing doc id or token' }
+    return { authorized: false, reason: 'missing doc id or token', statusCode: 401 }
   }
 
   const payload = verifyJwt(token, Y_WEBSOCKET_SECRET)
   if (!payload) {
-    return { authorized: false, reason: 'invalid token' }
+    return { authorized: false, reason: 'invalid token', statusCode: 401 }
   }
 
   if (payload.doc_id !== docId) {
-    return { authorized: false, reason: 'doc id mismatch' }
+    return { authorized: false, reason: 'doc id mismatch', statusCode: 401 }
   }
 
-  return { authorized: true, docId }
+  // Require signed subject (OSF user GUID) for connection traceability.
+  if (typeof payload.sub !== 'string' || !payload.sub) {
+    return { authorized: false, reason: 'missing subject', statusCode: 401 }
+  }
+
+  return { authorized: true, docId, sub: payload.sub }
 }
 
 module.exports = {
+  assertYWebsocketSecretConfigured,
   authorizeUpgrade,
-  isAuthEnabled,
   verifyJwt,
   isOriginAllowed,
   getDocIdFromRequest,

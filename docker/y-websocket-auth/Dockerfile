@@ -15,6 +15,8 @@ WORKDIR /home/node/app
 
 COPY auth.cjs server-wrapper.cjs ./
 
+USER root
+RUN npm install jsonwebtoken@9.0.2 --omit=dev
 USER node
 
 EXPOSE 1234
