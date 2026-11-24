@@ -61,6 +61,9 @@ function getEditorMarkdown() {
             const serializer = ctx.get(mCore.serializerCtx);
             content = serializer(view.state.doc);
         });
+    } else {
+        // Distinguish "editor unavailable" from a genuinely empty document.
+        console.warn('getEditorMarkdown: editor is not available; returning empty string');
     }
     return content;
 }
@@ -675,14 +678,18 @@ function resolveCompareVersion(compareVersion) {
         return String(compareVersion);
     }
     var select = document.getElementById('compareVersionSelect');
-    if (select) {
-        for (var i = 0; i < select.options.length; i++) {
-            var val = select.options[i].value;
-            if (val && val !== 'current') {
-                return val;
-            }
+    if (!select) {
+        // Unexpected: previous was requested but the compare dropdown is missing.
+        console.warn('resolveCompareVersion: compareVersionSelect not found; falling back to current');
+        return 'current';
+    }
+    for (var i = 0; i < select.options.length; i++) {
+        var val = select.options[i].value;
+        if (val && val !== 'current') {
+            return val;
         }
     }
+    // Expected when the wiki has no prior versions to compare against.
     return 'current';
 }
 
